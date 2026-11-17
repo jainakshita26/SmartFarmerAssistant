@@ -1,0 +1,28 @@
+# --- Frontend (React/Vite) ---
+node_modules/
+dist/
+dist-ssr/
+*.local
+.eslintcache
+
+# --- Backend (Python/FastAPI) ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+.pytest_cache/
+
+# --- AI/ML (Data & Models) ---
+# لو ملفات الداتا أو الموديلات حجمها أكبر من 50MB، يفضل متترفعش
+ai-ml/data/*.csv
+ai-ml/models/*.h5
+ai-ml/models/*.pkl
+.ipynb_checkpoints/
+
+# --- Logs & Editors ---
+*.log
+.vscode/
+.idea/
+.DS_Store
