@@ -47,6 +47,89 @@ function weatherIcon(code) {
   return '⛈️';
 }
 
+// ─── Model coverage fallbacks ───
+// The live lists come from GET /model-coverage.  These fallbacks keep the page
+// sensible if the backend is temporarily unreachable.
+const FALLBACK_MODEL_CROPS = [
+  { name: 'Rice', season: 'Kharif' },
+  { name: 'Maize', season: 'Kharif / Rabi' },
+  { name: 'Chickpea', season: 'Rabi' },
+  { name: 'Kidney Beans', season: 'Kharif' },
+  { name: 'Pigeon Peas', season: 'Kharif' },
+  { name: 'Moth Beans', season: 'Kharif' },
+  { name: 'Mung Bean', season: 'Kharif / Zaid' },
+  { name: 'Black Gram', season: 'Kharif' },
+  { name: 'Muskmelon', season: 'Zaid / Summer' },
+  { name: 'Lentil', season: 'Rabi' },
+  { name: 'Pomegranate', season: 'Year-round' },
+  { name: 'Banana', season: 'Year-round' },
+  { name: 'Mango', season: 'Summer' },
+  { name: 'Grapes', season: 'Year-round' },
+  { name: 'Watermelon', season: 'Zaid / Summer' },
+  { name: 'Apple', season: 'Temperate' },
+  { name: 'Orange', season: 'Winter' },
+  { name: 'Papaya', season: 'Year-round' },
+  { name: 'Coconut', season: 'Year-round' },
+  { name: 'Cotton', season: 'Kharif' },
+  { name: 'Jute', season: 'Kharif' },
+  { name: 'Coffee', season: 'Year-round' },
+];
+
+const FALLBACK_RULE_CROPS = [
+  { name: 'Wheat', season: 'Rabi' },
+  { name: 'Barley', season: 'Rabi' },
+  { name: 'Mustard', season: 'Rabi' },
+  { name: 'Peas', season: 'Rabi' },
+  { name: 'Potato', season: 'Rabi' },
+  { name: 'Millet', season: 'Kharif / Rabi' },
+  { name: 'Sorghum', season: 'Kharif / Rabi' },
+  { name: 'Onion', season: 'Rabi' },
+  { name: 'Soybean', season: 'Kharif' },
+  { name: 'Okra', season: 'Kharif' },
+  { name: 'Sugarcane', season: 'Kharif' },
+];
+
+const FALLBACK_DISEASE_CROPS = [
+  'Tomato', 'Potato', 'Corn', 'Apple', 'Grape', 'Peach', 'Bell Pepper',
+  'Cherry', 'Strawberry', 'Blueberry', 'Raspberry', 'Soybean', 'Squash', 'Orange',
+];
+
+const CROP_ICON_MAP = {
+  Rice: Wheat,
+  Maize: Sprout,
+  Chickpea: Sprout,
+  'Kidney Beans': Sprout,
+  'Pigeon Peas': Sprout,
+  'Moth Beans': Sprout,
+  'Mung Bean': Sprout,
+  'Black Gram': Sprout,
+  Muskmelon: Apple,
+  Lentil: Sprout,
+  Pomegranate: Apple,
+  Banana: Leaf,
+  Mango: Apple,
+  Grapes: Grape,
+  Watermelon: Apple,
+  Apple: Apple,
+  Orange: Apple,
+  Papaya: Leaf,
+  Coconut: Leaf,
+  Cotton: Sprout,
+  Jute: Leaf,
+  Coffee: Leaf,
+  Sugarcane: Sprout,
+  Wheat: Wheat,
+  Barley: Wheat,
+  Mustard: Flower2,
+  Peas: Sprout,
+  Potato: Carrot,
+  Millet: Wheat,
+  Sorghum: Wheat,
+  Onion: Sprout,
+  Soybean: Sprout,
+  Okra: Leaf,
+};
+
 export default function SmartCropApp() {
   // --- AUTH STATE ---
   const [user, setUser] = useState(null);
@@ -152,6 +235,34 @@ export default function SmartCropApp() {
   const [diseaseError, setDiseaseError] = useState('');
   const [loadingDisease, setLoadingDisease] = useState(false);
 
+  // Model coverage - fetched from the backend so the UI lists cannot drift
+  // from what the shipped models were actually trained on.
+  const [modelCrops, setModelCrops] = useState(FALLBACK_MODEL_CROPS);
+  const [ruleCrops, setRuleCrops] = useState(FALLBACK_RULE_CROPS);
+  const [diseaseCrops, setDiseaseCrops] = useState(FALLBACK_DISEASE_CROPS);
+  const [diseaseClassCount, setDiseaseClassCount] = useState(38);
+
+  useEffect(() => {
+    axios.get(`${API_URL}/model-coverage`)
+      .then(({ data }) => {
+        if (Array.isArray(data.crop_model?.crops) && data.crop_model.crops.length) {
+          setModelCrops(data.crop_model.crops);
+        }
+        if (Array.isArray(data.crop_rules?.crops)) {
+          setRuleCrops(data.crop_rules.crops);
+        }
+        if (Array.isArray(data.disease_model?.crops) && data.disease_model.crops.length) {
+          setDiseaseCrops(data.disease_model.crops.map(c => (typeof c === 'string' ? c : c.name)));
+        }
+        if (data.disease_model?.class_count) {
+          setDiseaseClassCount(data.disease_model.class_count);
+        }
+      })
+      .catch(() => {
+        // Fallback lists above keep the UI usable while the API is offline.
+      });
+  }, []);
+
   // Weather
   const [weatherCity, setWeatherCity] = useState('');
   const [weatherData, setWeatherData] = useState(null);
@@ -207,9 +318,14 @@ export default function SmartCropApp() {
       setCropResult({
         crop: data.recommended_crop,
         confidence: data.confidence,
+        confidenceType: data.confidence_type,
         alternatives: data.alternatives,
         tips: data.tips,
         method: data.method,
+        state: data.state,
+        region: data.region,
+        season: data.season,
+        modelTop: data.model_top,
       });
     } catch (err) {
       setCropError(err.message || 'Could not get a recommendation. Please check the backend is running and try again.');
@@ -323,35 +439,10 @@ export default function SmartCropApp() {
   ];
 
   const stats = [
-    { val: '99%', label: t.stat1 || 'Accuracy', icon: <Target size={28} strokeWidth={1.5} />, sub: t.stat1sub || 'AI Model Precision' },
-    { val: '141K+', label: t.stat2 || 'Images', icon: <Image size={28} strokeWidth={1.5} />, sub: t.stat2sub || 'Training Dataset' },
-    { val: '22', label: t.stat3 || 'Crops', icon: <Leaf size={28} strokeWidth={1.5} />, sub: t.stat3sub || 'Supported Varieties' },
-    { val: '38', label: t.stat4 || 'Diseases', icon: <Microscope size={28} strokeWidth={1.5} />, sub: t.stat4sub || 'Detectable Conditions' },
-  ];
-
-  const crops22 = [
-    { name: 'Rice', emoji: <Wheat size={32} strokeWidth={1.5} />, season: 'Kharif', desc: 'Staple food crop, thrives in warm, humid conditions.' },
-    { name: 'Wheat', emoji: <Wheat size={32} strokeWidth={1.5} />, season: 'Rabi', desc: 'Major cereal crop grown in cooler climates.' },
-    { name: 'Maize', emoji: <Sprout size={32} strokeWidth={1.5} />, season: 'Kharif/Rabi', desc: 'Versatile grain used for food and animal feed.' },
-    { name: 'Cotton', emoji: <Sprout size={32} strokeWidth={1.5} />, season: 'Kharif', desc: 'Important cash crop for textile industry.' },
-    { name: 'Sugarcane', emoji: <Sprout size={32} strokeWidth={1.5} />, season: 'Annual', desc: 'Tropical crop used for sugar production.' },
-    { name: 'Tomato', emoji: <Apple size={32} strokeWidth={1.5} />, season: 'Year-round', desc: 'Popular vegetable rich in vitamins A and C.' },
-    { name: 'Potato', emoji: <Carrot size={32} strokeWidth={1.5} />, season: 'Rabi', desc: 'Widely consumed root vegetable, adaptable crop.' },
-    { name: 'Onion', emoji: <Sprout size={32} strokeWidth={1.5} />, season: 'Rabi/Kharif', desc: 'Essential kitchen staple, stores well.' },
-    { name: 'Carrot', emoji: <Carrot size={32} strokeWidth={1.5} />, season: 'Rabi', desc: 'Root vegetable rich in beta-carotene.' },
-    { name: 'Lentil', emoji: <Sprout size={32} strokeWidth={1.5} />, season: 'Rabi', desc: 'Protein-rich pulse, improves soil nitrogen.' },
-    { name: 'Mustard', emoji: <Leaf size={32} strokeWidth={1.5} />, season: 'Rabi', desc: 'Oilseed crop with medicinal properties.' },
-    { name: 'Peas', emoji: <Sprout size={32} strokeWidth={1.5} />, season: 'Rabi', desc: 'Cool-season legume, fixes atmospheric nitrogen.' },
-    { name: 'Spinach', emoji: <Leaf size={32} strokeWidth={1.5} />, season: 'Rabi', desc: 'Leafy green packed with iron and nutrients.' },
-    { name: 'Mango', emoji: <Apple size={32} strokeWidth={1.5} />, season: 'Summer', desc: 'King of fruits, India\'s national fruit.' },
-    { name: 'Okra', emoji: <Leaf size={32} strokeWidth={1.5} />, season: 'Kharif', desc: 'Warm-season crop, also known as ladyfinger.' },
-    { name: 'Watermelon', emoji: <Apple size={32} strokeWidth={1.5} />, season: 'Summer', desc: 'Refreshing fruit grown in hot climates.' },
-    { name: 'Barley', emoji: <Wheat size={32} strokeWidth={1.5} />, season: 'Rabi', desc: 'Hardy grain used in food and beverages.' },
-    { name: 'Chickpea', emoji: <Sprout size={32} strokeWidth={1.5} />, season: 'Rabi', desc: 'Major pulse crop, rich in protein and fiber.' },
-    { name: 'Sorghum', emoji: <Wheat size={32} strokeWidth={1.5} />, season: 'Kharif/Rabi', desc: 'Drought-tolerant cereal for arid regions.' },
-    { name: 'Millet', emoji: <Wheat size={32} strokeWidth={1.5} />, season: 'Kharif', desc: 'Nutritious ancient grain, grows in poor soil.' },
-    { name: 'Apple', emoji: <Apple size={32} strokeWidth={1.5} />, season: 'Temperate', desc: 'Premium fruit grown in hilly regions.' },
-    { name: 'Grapes', emoji: <Grape size={32} strokeWidth={1.5} />, season: 'Year-round', desc: 'Versatile fruit for eating and winemaking.' },
+    { val: '99.55%', label: t.stat1 || 'Accuracy', icon: <Target size={28} strokeWidth={1.5} />, sub: 'Crop model holdout' },
+    { val: '54K+', label: t.stat2 || 'Images', icon: <Image size={28} strokeWidth={1.5} />, sub: 'PlantVillage training' },
+    { val: `${modelCrops.length}`, label: t.stat3 || 'Crops', icon: <Leaf size={28} strokeWidth={1.5} />, sub: 'RandomForest classes' },
+    { val: `${diseaseClassCount}`, label: t.stat4 || 'Diseases', icon: <Microscope size={28} strokeWidth={1.5} />, sub: 'MobileNetV2 classes' },
   ];
 
   // ─── RENDER ───
@@ -621,10 +712,10 @@ export default function SmartCropApp() {
             {/* Stats row */}
             <div className="hero-stats-row animate-fade-in-up stagger-4">
               {[
-                { val: '99%', label: 'AI Accuracy' },
-                { val: '22+', label: 'Crop Types' },
-                { val: '38', label: 'Diseases Detected' },
-                { val: '141K+', label: 'Images Analyzed' },
+                { val: '99.55%', label: 'Crop Model Holdout' },
+                { val: `${modelCrops.length}`, label: 'ML Crop Classes' },
+                { val: `${diseaseCrops.length}`, label: 'Disease Model Crops' },
+                { val: `${diseaseClassCount}`, label: 'Disease Classes' },
               ].map((s, i) => (
                 <div key={i}>
                   <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.75rem', color: 'var(--color-primary)' }}>{s.val}</div>
@@ -752,7 +843,7 @@ export default function SmartCropApp() {
             <span className="section-label">{t.knowCropsLabel || 'CROP GALLERY'}</span>
             <h2 className="section-title">{t.knowCropsTitle || 'Know Your Crops'}</h2>
             <p className="section-subtitle" style={{ margin: '0 auto' }}>
-              Explore India's most important crops in stunning detail — powered by AI intelligence.
+              Explore India's most important crops and their growing seasons. Model coverage is listed below.
             </p>
           </div>
 
@@ -780,26 +871,73 @@ export default function SmartCropApp() {
             ))}
           </div>
 
-          {/* Original crop grid (smaller, supplementary) */}
+          {/* Model coverage - driven by GET /model-coverage */}
           <div style={{ textAlign: 'center', marginBottom: '24px' }}>
             <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.15rem', color: 'var(--text-primary)', marginBottom: '6px' }}>
-              All 22 Supported Crops
+              Crops the App Can Actually Advise On
             </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Our AI can analyze and recommend across these crop varieties</p>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              These lists come from the shipped models and rules. No unsupported crops are advertised.
+            </p>
+          </div>
+
+          <div style={{ textAlign: 'center', marginBottom: '14px' }}>
+            <span className="badge badge-emerald" style={{ fontSize: '0.65rem' }}>
+              ML crop model · {modelCrops.length} classes
+            </span>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+              RandomForest trained on these crops. It is used only when N, P, K and pH are supplied.
+            </p>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '12px' }}>
-            {crops22.map((c, i) => (
-              <div
-                key={c.name}
-                className={`crop-card animate-fade-in-up stagger-${(i % 6) + 1}`}
-                style={{ opacity: 0 }}
-              >
-                <div style={{ marginBottom: '10px', color: 'var(--color-primary)', transition: 'transform 0.3s ease' }} className="crop-icon-wrapper">{c.emoji}</div>
-                <h4 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '3px' }}>{c.name}</h4>
-                <span className="badge badge-emerald" style={{ fontSize: '0.6rem' }}>{c.season}</span>
-              </div>
-            ))}
+            {modelCrops.map((c, i) => {
+              const Icon = CROP_ICON_MAP[c.name] || Sprout;
+              return (
+                <div
+                  key={c.name}
+                  className={`crop-card animate-fade-in-up stagger-${(i % 6) + 1}`}
+                  style={{ opacity: 0 }}
+                >
+                  <div style={{ marginBottom: '10px', color: 'var(--color-primary)', transition: 'transform 0.3s ease' }} className="crop-icon-wrapper">
+                    <Icon size={32} strokeWidth={1.5} />
+                  </div>
+                  <h4 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '3px' }}>{c.name}</h4>
+                  <span className="badge badge-emerald" style={{ fontSize: '0.6rem' }}>ML · {c.season}</span>
+                </div>
+              );
+            })}
           </div>
+
+          {ruleCrops.length > 0 && (
+            <>
+              <div style={{ textAlign: 'center', margin: '32px 0 14px' }}>
+                <span className="badge badge-amber" style={{ fontSize: '0.65rem' }}>
+                  Regional rule crops · {ruleCrops.length} extra
+                </span>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  Transparent region/season rules used when the best local crop is outside the ML model.
+                </p>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '12px' }}>
+                {ruleCrops.map((c, i) => {
+                  const Icon = CROP_ICON_MAP[c.name] || Sprout;
+                  return (
+                    <div
+                      key={c.name}
+                      className={`crop-card animate-fade-in-up stagger-${(i % 6) + 1}`}
+                      style={{ opacity: 0 }}
+                    >
+                      <div style={{ marginBottom: '10px', color: 'var(--color-primary)', transition: 'transform 0.3s ease' }} className="crop-icon-wrapper">
+                        <Icon size={32} strokeWidth={1.5} />
+                      </div>
+                      <h4 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '3px' }}>{c.name}</h4>
+                      <span className="badge badge-amber" style={{ fontSize: '0.6rem' }}>Rules · {c.season}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -879,6 +1017,10 @@ export default function SmartCropApp() {
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.5 }}>
                   Leave blank for a weather-based recommendation, or enter all four values from a soil test to use the AI soil model.
                 </p>
+                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.5 }}>
+                  The ML model is trained on {modelCrops.length} crops. If the best crop for your area is outside
+                  that list, the app uses transparent regional rules and labels the result accordingly.
+                </p>
               </div>
               {cropError && (
                 <p style={{ fontSize: '0.8rem', color: '#f87171', margin: 0 }}>{cropError}</p>
@@ -898,13 +1040,23 @@ export default function SmartCropApp() {
               <div className="result-card success">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
                   <p className="form-label" style={{ margin: 0 }}>{t.cropResultLabel || 'Recommended Crop'}</p>
-                  <span className="badge badge-emerald">{cropResult.method === 'ml_model' ? 'AI soil model' : 'Weather-based'}</span>
+                  <span className="badge badge-emerald">{
+                    cropResult.method === 'ml_model' ? 'AI soil model'
+                    : cropResult.method === 'ml_model+region_filter' ? 'AI + region filter'
+                    : cropResult.method === 'region_rules' ? 'Region + season rules'
+                    : 'Weather-based'
+                  }</span>
                 </div>
                 <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: '2rem', color: 'var(--color-primary)', marginBottom: '12px' }}>{cropResult.crop}</h3>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div className="progress-bar" style={{ flex: 1 }}><div className="progress-fill" style={{ width: `${cropResult.confidence}%` }} /></div>
                   <span style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--color-primary)' }}>{cropResult.confidence}%</span>
                 </div>
+                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '6px', marginBottom: 0 }}>
+                  {cropResult.confidenceType === 'rule_score' ? 'Suitability score (transparent rules)' : 'Model confidence'}
+                  {cropResult.state ? ` · ${cropResult.state}` : ''}
+                  {cropResult.season ? ` · ${cropResult.season}` : ''}
+                </p>
               </div>
               <div>
                 <p className="form-label">Alternative Crops</p>
@@ -954,8 +1106,11 @@ export default function SmartCropApp() {
               <div>
                 <label className="form-label">Plant Type</label>
                 <select value={diseasePlant} onChange={(e) => setDiseasePlant(e.target.value)} className="form-select">
-                  {['Tomato','Potato','Corn','Wheat','Rice','Cotton','Sugarcane','Onion','Carrot','Lentil','Mustard','Peas','Spinach','Mango','Okra','Watermelon','Barley','Chickpea','Sorghum','Millet','Apple','Grapes'].map(p => (<option key={p} value={p}>{p}</option>))}
+                  {diseaseCrops.map(p => (<option key={p} value={p}>{p}</option>))}
                 </select>
+                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  The disease model covers these {diseaseCrops.length} crops. Wheat, rice, cotton and other field crops need a different model.
+                </p>
               </div>
               {diseaseError && (
                 <p style={{ fontSize: '0.8rem', color: '#f87171', margin: 0 }}>{diseaseError}</p>
@@ -975,10 +1130,30 @@ export default function SmartCropApp() {
                   <span style={{ fontWeight: 800, color: '#fca5a5' }}>{diseaseResult.confidence}%</span>
                 </div>
               </div>
-              {diseaseResult.low_confidence && (
+              {diseaseResult.unsupported_plant_type ? (
+                <div className="result-card warning">
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                    ⚠️ This model cannot diagnose <strong>{diseaseResult.plant_type}</strong>. Supported crops: {diseaseCrops.join(', ')}.
+                  </p>
+                </div>
+              ) : diseaseResult.low_confidence && (
                 <div className="result-card warning">
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
                     ⚠️ <strong>Low confidence ({diseaseResult.confidence}%).</strong> Upload a sharp, well-lit close-up of a single leaf for a more reliable diagnosis.
+                  </p>
+                </div>
+              )}
+              {diseaseResult.crop_mismatch && (
+                <div className="result-card warning">
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                    ⚠️ The leaf looks like <strong>{diseaseResult.detected_crop}</strong>, not <strong>{diseaseResult.selected_crop}</strong>. Re-run the scan with the correct plant type for a cleaner result.
+                  </p>
+                </div>
+              )}
+              {diseaseResult.image_quality?.warnings?.length > 0 && (
+                <div className="result-card info">
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                    📷 <strong>Photo quality:</strong> {diseaseResult.image_quality.warnings.join(', ')}. A sharp, well-lit close-up of one leaf gives the best result.
                   </p>
                 </div>
               )}
@@ -1089,6 +1264,9 @@ export default function SmartCropApp() {
       {/* Crop Calendar */}
       {activeModal === 'calendar' && (
         <Modal title={<div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Calendar size={20} /> Crop Calendar</div>} subtitle="Optimal planting guide for all growing seasons" onClose={() => setActiveModal(null)} wide>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
+            General planting guide — this calendar is not a model prediction. The ML crop model covers the 22 crops listed on the home page.
+          </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {calendarData.map((s, i) => (
               <div key={i} style={{ background: s.color, border: `1px solid ${s.border}`, borderRadius: '16px', padding: '20px' }}>
